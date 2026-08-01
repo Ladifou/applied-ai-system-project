@@ -1,0 +1,230 @@
+classDiagram
+    %% Domain Model (Existing)
+    class Owner {
+        -owner_id: str
+        -name: str
+        -email: str
+        -phone: str
+        -address: str
+        -preferences: List~str~
+        -pets: List~Pet~
+        +add_preference(preference: str)
+        +has_preference(keyword: str): bool
+        +add_pet(pet: Pet)
+        +filter_all_tasks(pet_id, completed, frequency)
+        +generate_global_schedule(date: datetime)
+    }
+
+    class Pet {
+        -pet_id: str
+        -name: str
+        -pet_type: str
+        -breed: str
+        -age: int
+        -owner: Owner
+        -tasks: List~Task~
+        +add_task(task: Task)
+        +mark_task_complete(task: Task)
+        +filter_tasks(completed, frequency)
+    }
+
+    class Task {
+        -task_id: str
+        -name: str
+        -description: str
+        -task_type: TaskType
+        -default_duration: int
+        -default_frequency: str
+        -default_priority: str
+        -pet: Pet
+        -due_date: datetime
+        -start_time: datetime
+        -end_time: datetime
+        -is_completed: bool
+        -constraints: List~Constraint~
+        +mark_complete()
+        +create_next_occurrence(): Task
+        +update_time_slot(start, end)
+        +add_constraint(constraint: Constraint)
+    }
+
+    class Scheduler {
+        -scheduler_id: str
+        -pet: Pet
+        -tasks: List~Task~
+        +generate_daily_plan(date): Dict
+        +find_available_slot(task, constraints): datetime
+        +detect_conflicts(target_date): List
+        +explain_schedule(explanation: str): str
+        -_get_sorted_tasks(): List~Task~
+        -_find_schedule_gaps(base_date, duration, task)
+        -_get_all_scheduled_times(target_date)
+    }
+
+    class Constraint {
+        -constraint_id: str
+        -constraint_type: str
+        -description: str
+        -is_hard_constraint: bool
+        -priority: int
+        -affected_times: Dict
+        +validate(task: Task, time_slot: dict): bool
+    }
+
+    class TaskType {
+        <<enumeration>>
+        WALK
+        FEEDING
+        MEDICATION
+        ENRICHMENT
+        GROOMING
+    }
+
+    %% AI Service Layer (New)
+    class AIServiceLayer {
+        -model_service: ModelService
+        -retriever: Retriever
+        -context_builder: ContextBuilder
+        -prompt_manager: PromptManager
+        +get_task_recommendation(pet: Pet, owner: Owner): Task
+        +generate_explanation(task: Task, schedule): str
+        +evaluate_schedule(schedule: Dict): ScheduleScore
+    }
+
+    class ModelService {
+        -model_name: str
+        -model_instance: Any
+        -inference_engine: InferenceEngine
+        -cache: Dict
+        +load_model()
+        +infer(prompt: str, context: Dict): str
+        +batch_infer(prompts: List): List
+        +clear_cache()
+    }
+
+    class InferenceEngine {
+        -model: Any
+        -max_tokens: int
+        -temperature: float
+        -top_p: float
+        +predict(prompt: str, **kwargs): str
+        +stream_predict(prompt: str)
+        +get_usage_stats()
+    }
+
+    class Retriever {
+        -schedule_history: List~Dict~
+        -task_patterns: Dict
+        -embedding_model: Any
+        +retrieve_similar_schedules(pet: Pet, owner: Owner, k: int): List
+        +retrieve_task_examples(task_type: TaskType, k: int): List
+        +update_history(schedule: Dict)
+        -_compute_similarity(schedule1, schedule2): float
+    }
+
+    class ContextBuilder {
+        +build_schedule_context(pet: Pet, owner: Owner, date): Dict
+        +build_task_context(task: Task, schedule: Dict): Dict
+        +format_as_prompt(context: Dict): str
+        -_extract_pet_features(pet: Pet): Dict
+        -_extract_owner_constraints(owner: Owner): Dict
+        -_extract_schedule_state(schedule: Dict): Dict
+    }
+
+    class PromptManager {
+        -templates: Dict
+        -few_shot_examples: List
+        +get_recommendation_prompt(context: Dict): str
+        +get_explanation_prompt(task: Task, schedule): str
+        +get_preference_prompt(owner: Owner): str
+        +load_templates(template_path: str)
+        -_format_examples(examples: List): str
+    }
+
+    class TaskRecommender {
+        -ai_service: AIServiceLayer
+        +recommend_tasks(pet: Pet, owner: Owner): List~Task~
+        +rank_recommendations(tasks: List, owner: Owner): List
+        +get_recommendation_confidence(task: Task): float
+    }
+
+    class ExplanationGenerator {
+        -ai_service: AIServiceLayer
+        +generate_task_explanation(task: Task): str
+        +generate_schedule_summary(schedule: Dict): str
+        +generate_conflict_explanation(conflict: Tuple): str
+    }
+
+    class PreferenceLearner {
+        -ai_service: AIServiceLayer
+        -preference_history: List~Dict~
+        +learn_preferences(completed_schedules: List): List~str~
+        +update_owner_preferences(owner: Owner, schedule: Dict)
+        +infer_implicit_preferences(owner: Owner): List
+    }
+
+    class Evaluator {
+        -retriever: Retriever
+        +evaluate_schedule(schedule: Dict, owner: Owner): ScheduleScore
+        +compare_schedules(schedule1: Dict, schedule2: Dict): float
+        +check_constraint_satisfaction(schedule: Dict): Dict
+        -_compute_owner_satisfaction(schedule): float
+        -_compute_conflict_rate(schedule): float
+    }
+
+    class ScheduleScore {
+        -overall_score: float
+        -owner_satisfaction: float
+        -conflict_rate: float
+        -constraint_satisfaction: float
+        -explanation: str
+        +get_summary(): str
+    }
+
+    class Tester {
+        -evaluator: Evaluator
+        +test_model_vs_rules(test_cases: List): TestResults
+        +validate_ai_output(ai_schedule: Dict, rule_schedule: Dict): bool
+        +run_integration_tests(test_suite: List): TestResults
+        -_compare_schedules(schedule1, schedule2): TestResult
+    }
+
+    class TestResults {
+        -test_name: str
+        -passed: int
+        -failed: int
+        -total: int
+        -details: List
+        +get_summary(): str
+    }
+
+    %% Relationships
+    Owner "1" --> "*" Pet : owns
+    Pet "1" --> "*" Task : has
+    Task "*" --> "*" Constraint : has
+    Task --> TaskType : uses
+    Scheduler "1" --> "1" Pet : schedules
+
+    AIServiceLayer --> ModelService : uses
+    AIServiceLayer --> Retriever : uses
+    AIServiceLayer --> ContextBuilder : uses
+    AIServiceLayer --> PromptManager : uses
+
+    ModelService --> InferenceEngine : delegates
+
+    TaskRecommender --> AIServiceLayer : uses
+    ExplanationGenerator --> AIServiceLayer : uses
+    PreferenceLearner --> AIServiceLayer : uses
+
+    Evaluator --> Retriever : uses
+    Evaluator --> ScheduleScore : produces
+
+    Tester --> Evaluator : uses
+    Tester --> TestResults : produces
+
+    ContextBuilder --> Owner : analyzes
+    ContextBuilder --> Pet : analyzes
+    ContextBuilder --> Task : analyzes
+
+    Retriever --> Task : stores_history
+    Scheduler --> Constraint : uses

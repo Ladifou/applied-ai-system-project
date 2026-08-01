@@ -1,0 +1,662 @@
+from dataclasses import dataclass, field
+from typing import List, Dict
+from datetime import datetime
+from enum import Enum
+import os
+from pawpal_system import Pet, Owner, Task, TaskType
+
+try:
+    from anthropic import Anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    Anthropic = None
+
+
+class Model(Enum):
+    """Supported AI models for inference."""
+    CLAUDE_OPUS = "claude-opus-5"
+    CLAUDE_SONNET = "claude-sonnet-5"
+    CLAUDE_HAIKU = "claude-haiku-4-5-20251001"
+
+
+@dataclass
+class InferenceEngine:
+    """Handles actual LLM inference calls to Claude API."""
+
+    model_name: str = Model.CLAUDE_HAIKU.value
+    max_tokens: int = 500
+    temperature: float = 0.7
+    api_key: str = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
+
+    def __post_init__(self):
+        """Initialize Anthropic client if available."""
+        if not ANTHROPIC_AVAILABLE:
+            raise ImportError(
+                "anthropic package is required. Install with: pip install anthropic"
+            )
+        if not self.api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY environment variable not set. "
+                "Set it with: export ANTHROPIC_API_KEY='your-key-here'"
+            )
+        self.client = Anthropic(api_key=self.api_key)
+
+    def infer(self, prompt: str) -> str:
+        """Call Claude API and return the response."""
+        try:
+            message = self.client.messages.create(
+                model=self.model_name,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return message.content[0].text
+        except Exception as e:
+            raise RuntimeError(f"API call failed: {str(e)}")
+
+    def infer_with_context(
+        self, system_prompt: str, user_prompt: str
+    ) -> str:
+        """Call Claude API with system prompt for better control."""
+        try:
+            message = self.client.messages.create(
+                model=self.model_name,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            return message.content[0].text
+        except Exception as e:
+            raise RuntimeError(f"API call failed: {str(e)}")
+
+
+@dataclass
+class ContextBuilder:
+    """Extracts and formats domain context into structured prompts."""
+
+    def build_pet_profile(self, pet: Pet) -> Dict[str, str]:
+        """Extract pet characteristics for context."""
+        return {
+            "name": pet.name,
+            "type": pet.pet_type,
+            "breed": pet.breed,
+            "age": pet.age,
+            "task_count": len(pet.tasks),
+            "completed_tasks": len([t for t in pet.tasks if t.is_completed]),
+        }
+
+    def build_owner_profile(self, owner: Owner) -> Dict[str, str]:
+        """Extract owner constraints and preferences."""
+        return {
+            "name": owner.name,
+            "pet_count": len(owner.pets),
+            "preferences": owner.preferences,
+            "availability_window": self._extract_availability(owner),
+        }
+
+    def build_schedule_context(
+        self, pet: Pet, owner: Owner, date: datetime
+    ) -> Dict:
+        """Build complete context for a scheduling decision."""
+        tasks_on_date = [
+            t
+            for t in pet.tasks
+            if t.due_date.date() == date.date() and not t.is_completed
+        ]
+        return {
+            "pet_profile": self.build_pet_profile(pet),
+            "owner_profile": self.build_owner_profile(owner),
+            "date": date.strftime("%A, %B %d, %Y"),
+            "pending_tasks": [
+                {
+                    "name": t.name,
+                    "type": t.task_type.value,
+                    "priority": t.default_priority,
+                    "duration": t.default_duration,
+                }
+                for t in tasks_on_date
+            ],
+            "other_pets": [p.name for p in owner.pets if p.pet_id != pet.pet_id],
+        }
+
+    def build_task_context(self, task: Task, schedule: Dict) -> Dict:
+        """Build context for a specific task scheduling decision."""
+        return {
+            "task_name": task.name,
+            "task_type": task.task_type.value,
+            "priority": task.default_priority,
+            "duration": task.default_duration,
+            "frequency": task.default_frequency,
+            "pet": task.pet.name,
+            "scheduled_time": f"{task.start_time.strftime('%H:%M')}-{task.end_time.strftime('%H:%M')}"
+            if task.start_time
+            else "Not scheduled",
+            "scheduled_tasks_count": len(
+                [t for t in schedule.get("scheduled_tasks", []) if t.start_time]
+            ),
+        }
+
+    @staticmethod
+    def _extract_availability(owner: Owner) -> str:
+        """Extract time availability from owner preferences."""
+        for pref in owner.preferences:
+            if "available" in pref.lower():
+                return pref
+        return "Not specified"
+
+
+@dataclass
+class PromptManager:
+    """Manages prompt templates for different AI tasks."""
+
+    templates: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self):
+        """Initialize default prompt templates."""
+        self.templates = {
+            "explanation": self._explanation_template(),
+            "recommendation": self._recommendation_template(),
+            "preference": self._preference_template(),
+        }
+
+    def get_explanation_prompt(self, task_context: Dict, schedule_context: Dict) -> str:
+        """Generate a prompt for explaining why a task is scheduled at a specific time."""
+        template = self.templates["explanation"]
+        return template.format(
+            task_name=task_context["task_name"],
+            task_type=task_context["task_type"],
+            priority=task_context["priority"],
+            duration=task_context["duration"],
+            scheduled_time=task_context["scheduled_time"],
+            pet_name=schedule_context["pet_profile"]["name"],
+            owner_preferences=", ".join(
+                schedule_context["owner_profile"]["preferences"]
+            ),
+            other_pets=", ".join(schedule_context["other_pets"])
+            or "None",
+            frequency=task_context.get("frequency", "daily"),
+        )
+
+    def get_recommendation_prompt(self, pet_profile: Dict, owner_profile: Dict) -> str:
+        """Generate a prompt for recommending new tasks for a pet."""
+        template = self.templates["recommendation"]
+        return template.format(
+            pet_name=pet_profile["name"],
+            pet_type=pet_profile["type"],
+            breed=pet_profile["breed"],
+            age=pet_profile["age"],
+            owner_name=owner_profile["name"],
+            current_tasks=pet_profile["task_count"],
+            completed_tasks=pet_profile["completed_tasks"],
+            pet_count=owner_profile["pet_count"],
+            owner_preferences=", ".join(owner_profile["preferences"])
+            or "Not specified",
+        )
+
+    @staticmethod
+    def _explanation_template() -> str:
+        return """You are a pet care scheduling expert. Explain why the following task scheduling decision makes sense:
+
+Task: {task_name} ({task_type})
+Priority: {priority}
+Duration: {duration} minutes
+Scheduled Time: {scheduled_time}
+Pet: {pet_name}
+Owner Preferences: {owner_preferences}
+Other Pets: {other_pets}
+Task Frequency: {frequency}
+
+Provide a 2-3 sentence explanation that covers:
+1. Why this time works for the task type and priority
+2. How it respects owner preferences
+3. Any conflict avoidance or multi-pet considerations
+
+Be concise and conversational."""
+
+    @staticmethod
+    def _recommendation_template() -> str:
+        return """You are a pet care expert. Based on the following pet and owner information, recommend 2-3 new tasks that would improve the pet's wellbeing and quality of life:
+
+Pet Information:
+- Name: {pet_name}
+- Type: {pet_type}
+- Breed: {breed}
+- Age: {age} years old
+- Current Tasks: {current_tasks} tasks ({completed_tasks} completed)
+
+Owner Information:
+- Name: {owner_name}
+- Pets: {pet_count} total pets
+- Preferences: {owner_preferences}
+
+For each recommendation:
+1. Task name
+2. Task type (walk, feeding, grooming, enrichment, medication)
+3. Priority (high, medium, low)
+4. Frequency (daily, weekly, occasional)
+5. Brief reason why this task would benefit {pet_name}
+
+Format as a numbered list."""
+
+    @staticmethod
+    def _preference_template() -> str:
+        return """Analyze this owner's schedule history and infer their implicit preferences and constraints:
+
+{schedule_history}
+
+List 3-4 implicit preferences discovered (e.g., 'prefers morning walks', 'avoids evening grooming').
+Be specific and actionable."""
+
+
+@dataclass
+class Retriever:
+    """Retrieves similar schedules and task patterns from history."""
+
+    schedule_history: List[Dict] = field(default_factory=list)
+    task_patterns: Dict[str, int] = field(default_factory=dict)
+
+    def retrieve_similar_schedules(
+        self, pet: Pet, owner: Owner, k: int = 3
+    ) -> List[Dict]:
+        """Find k most similar historical schedules for the pet."""
+        if not self.schedule_history:
+            return []
+
+        similarities = [
+            (i, self._compute_similarity(pet, owner, schedule))
+            for i, schedule in enumerate(self.schedule_history)
+        ]
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        return [self.schedule_history[i] for i, _ in similarities[:k]]
+
+    def retrieve_task_examples(self, task_type: TaskType, k: int = 3) -> List[str]:
+        """Find k examples of successfully scheduled tasks of a given type."""
+        matching = [
+            task
+            for task, count in self.task_patterns.items()
+            if task_type.value in task.lower()
+        ]
+        return matching[:k] if matching else []
+
+    def update_history(self, schedule: Dict) -> None:
+        """Add a completed schedule to history."""
+        self.schedule_history.append(schedule)
+
+    def get_task_frequency_stats(self) -> Dict[str, float]:
+        """Get statistics on task frequency in history."""
+        if not self.task_patterns:
+            return {}
+        total = sum(self.task_patterns.values())
+        return {
+            task: freq / total for task, freq in self.task_patterns.items()
+        }
+
+    @staticmethod
+    def _compute_similarity(pet: Pet, owner: Owner, schedule: Dict) -> float:
+        """Compute similarity between current pet/owner and historical schedule."""
+        score = 0.0
+        if schedule.get("pet_type") == pet.pet_type:
+            score += 0.4
+        if schedule.get("pet_age") == pet.age:
+            score += 0.3
+        if any(pref in owner.preferences for pref in schedule.get("owner_prefs", [])):
+            score += 0.3
+        return score
+
+
+class ExplanationGenerator:
+    """Generates enhanced explanations for scheduling decisions using AI."""
+
+    def __init__(
+        self,
+        model: Model = Model.CLAUDE_HAIKU,
+        use_llm: bool = False,
+        api_key: str = "",
+    ):
+        self.model = model
+        self.use_llm = use_llm and ANTHROPIC_AVAILABLE
+        self.context_builder = ContextBuilder()
+        self.prompt_manager = PromptManager()
+
+        if self.use_llm:
+            self.inference_engine = InferenceEngine(
+                model_name=model.value,
+                api_key=api_key or os.getenv("ANTHROPIC_API_KEY", ""),
+            )
+        else:
+            self.inference_engine = None
+
+    def generate_task_explanation(
+        self, task: Task, schedule: Dict, owner: Owner
+    ) -> str:
+        """Generate an AI-enhanced explanation for why a task is scheduled at a specific time."""
+        if not task.start_time or not task.end_time:
+            return f"Task {task.name} is not yet scheduled."
+
+        task_context = self.context_builder.build_task_context(task, schedule)
+        schedule_context = self.context_builder.build_schedule_context(
+            task.pet, owner, task.due_date
+        )
+
+        if self.use_llm and self.inference_engine:
+            return self._generate_explanation_with_llm(
+                task_context, schedule_context
+            )
+        else:
+            return self._generate_explanation(task, schedule_context)
+
+    def generate_schedule_summary(self, schedule: Dict, owner: Owner) -> str:
+        """Generate a summary of the daily schedule with AI insights."""
+        pet = schedule.get("pet")
+        if not pet:
+            return "Unable to generate summary: pet information missing."
+
+        scheduled = schedule.get("scheduled_tasks", [])
+        if not scheduled:
+            return f"No tasks scheduled for {pet.name} on this date."
+
+        summary = f"\n{'='*60}\nDAILY SCHEDULE SUMMARY FOR {pet.name.upper()}\n{'='*60}\n"
+        summary += f"\nScheduled Tasks: {len(scheduled)}\n"
+
+        for i, task in enumerate(scheduled, 1):
+            explanation = self.generate_task_explanation(task, schedule, owner)
+            summary += f"\n{i}. {task.name}\n"
+            summary += f"   Time: {task.start_time.strftime('%H:%M')}-{task.end_time.strftime('%H:%M')}\n"
+            summary += f"   Explanation: {explanation}\n"
+
+        return summary
+
+    def _generate_explanation_with_llm(
+        self, task_context: Dict, schedule_context: Dict
+    ) -> str:
+        """Generate explanation using Claude API."""
+        system_prompt = """You are a pet care scheduling expert. Your job is to explain
+scheduling decisions in a friendly, conversational way. Keep explanations to 2-3 sentences.
+Focus on why the timing makes sense for the pet and owner."""
+
+        prompt = self.prompt_manager.get_explanation_prompt(
+            task_context, schedule_context
+        )
+
+        try:
+            response = self.inference_engine.infer_with_context(
+                system_prompt=system_prompt, user_prompt=prompt
+            )
+            return response.strip()
+        except RuntimeError as e:
+            print(f"Warning: LLM call failed, falling back to rule-based explanation: {e}")
+            return self._generate_explanation_fallback(task_context)
+
+    def _generate_explanation_fallback(self, task_context: Dict) -> str:
+        """Fallback explanation when LLM is unavailable."""
+        task_name = task_context.get("task_name", "Task")
+        task_type = task_context.get("task_type", "")
+        priority = task_context.get("priority", "")
+
+        if priority.lower() == "high":
+            return f"{task_name} is a high-priority task scheduled early to ensure it gets done."
+        else:
+            return f"{task_name} ({task_type}) is scheduled during an available time slot."
+
+    @staticmethod
+    def _generate_explanation(
+        task: Task, schedule_context: Dict
+    ) -> str:
+        """Generate a structured explanation using available information."""
+        reasons = []
+
+        if task.priority.lower() == "high":
+            reasons.append(
+                f"High-priority task scheduled early to ensure completion"
+            )
+        elif task.priority.lower() == "medium":
+            reasons.append(
+                f"Medium-priority task scheduled after high-priority tasks"
+            )
+
+        if task.task_type == TaskType.FEEDING:
+            reasons.append("Essential for pet health and nutrition")
+        elif task.task_type == TaskType.WALK:
+            reasons.append("Exercise important for physical wellbeing")
+        elif task.task_type == TaskType.ENRICHMENT:
+            reasons.append("Mental stimulation activity")
+        elif task.task_type == TaskType.GROOMING:
+            reasons.append("Hygiene and health maintenance")
+        elif task.task_type == TaskType.MEDICATION:
+            reasons.append("Critical health requirement")
+
+        if len(schedule_context.get("owner_profile", {}).get("preferences", [])) > 0:
+            reasons.append("Aligns with owner preferences and availability")
+
+        if schedule_context.get("other_pets"):
+            reasons.append(
+                f"Scheduled to avoid conflicts with other pets' activities"
+            )
+
+        return " | ".join(reasons)
+
+
+class TaskRecommender:
+    """Recommends new tasks for pets based on their characteristics and owner patterns."""
+
+    def __init__(
+        self,
+        model: Model = Model.CLAUDE_HAIKU,
+        use_llm: bool = False,
+        api_key: str = "",
+    ):
+        self.model = model
+        self.use_llm = use_llm and ANTHROPIC_AVAILABLE
+        self.context_builder = ContextBuilder()
+        self.prompt_manager = PromptManager()
+        self.retriever = Retriever()
+
+        if self.use_llm:
+            self.inference_engine = InferenceEngine(
+                model_name=model.value,
+                api_key=api_key or os.getenv("ANTHROPIC_API_KEY", ""),
+            )
+        else:
+            self.inference_engine = None
+
+    def recommend_tasks(self, pet: Pet, owner: Owner) -> List[Dict]:
+        """Generate task recommendations for a pet."""
+        pet_profile = self.context_builder.build_pet_profile(pet)
+        owner_profile = self.context_builder.build_owner_profile(owner)
+
+        if self.use_llm and self.inference_engine:
+            return self._recommend_tasks_with_llm(pet_profile, owner_profile, pet)
+        else:
+            return self._generate_recommendations(pet)
+
+    def rank_recommendations(
+        self, recommendations: List[Dict], owner: Owner
+    ) -> List[Dict]:
+        """Rank recommendations by fit with owner preferences and pet needs."""
+        scored = []
+        for rec in recommendations:
+            score = self._compute_recommendation_score(rec, owner)
+            scored.append({"recommendation": rec, "score": score})
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return [item["recommendation"] for item in scored]
+
+    def get_recommendation_confidence(self, recommendation: Dict) -> float:
+        """Return confidence score for a recommendation (0-1)."""
+        return recommendation.get("confidence", 0.7)
+
+    def _recommend_tasks_with_llm(
+        self, pet_profile: Dict, owner_profile: Dict, pet: Pet
+    ) -> List[Dict]:
+        """Generate recommendations using Claude API."""
+        system_prompt = """You are a pet care expert. Recommend 2-3 new tasks that would
+improve the pet's wellbeing. For each task, provide:
+1. Task name
+2. Task type (walk, feeding, grooming, enrichment, medication)
+3. Priority (high, medium, low)
+4. Frequency (daily, weekly, occasional)
+5. Brief reason (1 sentence)
+
+Format as a numbered list. Be specific and actionable."""
+
+        prompt = self.prompt_manager.get_recommendation_prompt(
+            pet_profile, owner_profile
+        )
+
+        try:
+            response = self.inference_engine.infer_with_context(
+                system_prompt=system_prompt, user_prompt=prompt
+            )
+            return self._parse_llm_recommendations(response)
+        except RuntimeError as e:
+            print(f"Warning: LLM call failed, using rule-based recommendations: {e}")
+            return self._generate_recommendations(pet)
+
+    def _parse_llm_recommendations(self, llm_response: str) -> List[Dict]:
+        """Parse LLM response into structured recommendations."""
+        recommendations = []
+        lines = llm_response.strip().split("\n")
+
+        for line in lines:
+            if not line.strip() or line.startswith("#"):
+                continue
+
+            # Try to extract recommendation from line
+            # Format: "1. Task Name (type) - priority - frequency - Reason"
+            if any(char.isdigit() for char in line[:2]):
+                try:
+                    rec = self._extract_recommendation_from_line(line)
+                    if rec:
+                        recommendations.append(rec)
+                except (IndexError, ValueError):
+                    continue
+
+        return recommendations if recommendations else self._get_default_recommendations()
+
+    @staticmethod
+    def _extract_recommendation_from_line(line: str) -> Dict:
+        """Extract a single recommendation from a formatted line."""
+        parts = line.split("-")
+        if len(parts) < 4:
+            return None
+
+        task_name = parts[0].strip().lstrip("0123456789. ").strip()
+        task_type = parts[1].strip().lower() if len(parts) > 1 else "enrichment"
+        priority = parts[2].strip().lower() if len(parts) > 2 else "medium"
+        reason = "-".join(parts[3:]).strip() if len(parts) > 3 else "Recommended"
+
+        return {
+            "task_name": task_name,
+            "task_type": task_type,
+            "priority": priority,
+            "frequency": "daily" if "daily" in reason.lower() else "weekly",
+            "reason": reason,
+            "confidence": 0.85,
+        }
+
+    @staticmethod
+    def _get_default_recommendations() -> List[Dict]:
+        """Return default recommendations when parsing fails."""
+        return [
+            {
+                "task_name": "Regular Exercise",
+                "task_type": "walk",
+                "priority": "high",
+                "frequency": "daily",
+                "reason": "Maintains physical health and energy levels",
+                "confidence": 0.8,
+            }
+        ]
+
+    @staticmethod
+    def _generate_recommendations(pet: Pet) -> List[Dict]:
+        """Generate task recommendations based on pet type and characteristics."""
+        recommendations = []
+
+        if pet.pet_type.lower() == "dog":
+            recommendations.extend(
+                [
+                    {
+                        "task_name": "Evening Walk",
+                        "task_type": "walk",
+                        "priority": "high",
+                        "frequency": "daily",
+                        "reason": "Dogs need regular exercise for physical health and behavioral balance",
+                        "confidence": 0.95,
+                    },
+                    {
+                        "task_name": "Training Session",
+                        "task_type": "enrichment",
+                        "priority": "medium",
+                        "frequency": "weekly",
+                        "reason": "Mental stimulation and obedience training",
+                        "confidence": 0.85,
+                    },
+                    {
+                        "task_name": "Brush Coat",
+                        "task_type": "grooming",
+                        "priority": "medium",
+                        "frequency": "weekly",
+                        "reason": "Maintain coat health and reduce shedding",
+                        "confidence": 0.8,
+                    },
+                ]
+            )
+
+        elif pet.pet_type.lower() == "cat":
+            recommendations.extend(
+                [
+                    {
+                        "task_name": "Interactive Play",
+                        "task_type": "enrichment",
+                        "priority": "high",
+                        "frequency": "daily",
+                        "reason": "Cats need mental stimulation and physical activity indoors",
+                        "confidence": 0.9,
+                    },
+                    {
+                        "task_name": "Litter Box Cleaning",
+                        "task_type": "grooming",
+                        "priority": "high",
+                        "frequency": "daily",
+                        "reason": "Essential for hygiene and pet comfort",
+                        "confidence": 0.95,
+                    },
+                    {
+                        "task_name": "Claw Trimming",
+                        "task_type": "grooming",
+                        "priority": "medium",
+                        "frequency": "weekly",
+                        "reason": "Maintain healthy claws and prevent overgrowth",
+                        "confidence": 0.75,
+                    },
+                ]
+            )
+
+        if pet.age > 7:
+            recommendations.append(
+                {
+                    "task_name": "Health Check",
+                    "task_type": "medication",
+                    "priority": "high",
+                    "frequency": "weekly",
+                    "reason": "Senior pets require more frequent health monitoring",
+                    "confidence": 0.9,
+                }
+            )
+
+        return recommendations
+
+    @staticmethod
+    def _compute_recommendation_score(recommendation: Dict, owner: Owner) -> float:
+        """Score recommendation based on owner preferences and pet needs."""
+        score = recommendation.get("confidence", 0.5)
+
+        task_type = recommendation.get("task_type", "").lower()
+        for pref in owner.preferences:
+            if task_type in pref.lower():
+                score += 0.2
+
+        return min(score, 1.0)
