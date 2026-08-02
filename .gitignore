@@ -3,4 +3,9 @@ __pycache__/
 .venv_new/
 .pytest_cache/
 .DS_Store
+.env
+.env.example
+GEMINI_QUICK_SETUP.md
+LLM_SETUP_GUIDE.md
+MIGRATION_SUMMARY.md
 OPTIMIZATION_SUMMARY.md

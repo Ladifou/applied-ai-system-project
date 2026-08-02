@@ -3,71 +3,136 @@ from typing import List, Dict
 from datetime import datetime
 from enum import Enum
 import os
+from pathlib import Path
 from pawpal_system import Pet, Owner, Task, TaskType
+from prompts_manager import PromptManager
 
 try:
-    from anthropic import Anthropic
-    ANTHROPIC_AVAILABLE = True
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
 except ImportError:
-    ANTHROPIC_AVAILABLE = False
-    Anthropic = None
+    GEMINI_AVAILABLE = False
+    genai = None
+
+try:
+    from dotenv import load_dotenv
+    DOTENV_AVAILABLE = True
+except ImportError:
+    DOTENV_AVAILABLE = False
+
+
+
+
+def load_env_config():
+    """Load configuration from .env file if available."""
+    if not DOTENV_AVAILABLE:
+        return
+
+    # Try primary path first
+    env_path = Path(__file__).parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path, override=True)
+        return
+
+    # Try alternative path (current working directory)
+    alt_path = Path.cwd() / ".env"
+    if alt_path.exists():
+        load_dotenv(alt_path, override=True)
+        return
+
+
+def _get_api_key() -> str:
+    """Get API key from .env file or environment variable."""
+    import sys
+
+    # Debug: Show what we're looking for
+    script_dir = Path(__file__).parent
+    env_file_1 = script_dir / ".env"
+    env_file_2 = Path.cwd() / ".env"
+
+    # Load the config
+    load_env_config()
+
+    # Try to get the key
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+
+    # Debug output
+    if not api_key:
+        print(f"[DEBUG] Looking for .env files:", file=sys.stderr)
+        print(f"  Path 1: {env_file_1} (exists: {env_file_1.exists()})", file=sys.stderr)
+        print(f"  Path 2: {env_file_2} (exists: {env_file_2.exists()})", file=sys.stderr)
+        print(f"  DOTENV_AVAILABLE: {DOTENV_AVAILABLE}", file=sys.stderr)
+        if env_file_1.exists():
+            print(f"  Reading {env_file_1}...", file=sys.stderr)
+            with open(env_file_1) as f:
+                lines = f.readlines()
+                for line in lines:
+                    if line.startswith("GEMINI_API_KEY"):
+                        print(f"    Found line: {line[:50]}", file=sys.stderr)
+
+    return api_key
 
 
 class Model(Enum):
     """Supported AI models for inference."""
-    CLAUDE_OPUS = "claude-opus-5"
-    CLAUDE_SONNET = "claude-sonnet-5"
-    CLAUDE_HAIKU = "claude-haiku-4-5-20251001"
+    GEMINI_3_5_FLASH = "gemini-3.5-flash"
+    GEMINI_1_5_FLASH = "gemini-1.5-flash"
+    GEMINI_1_5_PRO = "gemini-1.5-pro"
 
 
 @dataclass
 class InferenceEngine:
-    """Handles actual LLM inference calls to Claude API."""
+    """Handles actual LLM inference calls to Google Gemini API."""
 
-    model_name: str = Model.CLAUDE_HAIKU.value
-    max_tokens: int = 500
+    model_name: str = Model.GEMINI_3_5_FLASH.value
+    max_tokens: int = 5000
     temperature: float = 0.7
-    api_key: str = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
+    api_key: str = field(default_factory=lambda: _get_api_key())
 
     def __post_init__(self):
-        """Initialize Anthropic client if available."""
-        if not ANTHROPIC_AVAILABLE:
+        """Initialize Gemini client if available."""
+        if not GEMINI_AVAILABLE:
             raise ImportError(
-                "anthropic package is required. Install with: pip install anthropic"
+                "google-generativeai package is required. Install with: pip install google-generativeai"
             )
         if not self.api_key:
             raise ValueError(
-                "ANTHROPIC_API_KEY environment variable not set. "
-                "Set it with: export ANTHROPIC_API_KEY='your-key-here'"
+                "GEMINI_API_KEY not found. Please:\n"
+                "1. Install python-dotenv: pip install python-dotenv\n"
+                "2. Create .env file with: GEMINI_API_KEY=your-key-here\n"
+                "3. Get free key from: https://aistudio.google.com/app/apikey"
             )
-        self.client = Anthropic(api_key=self.api_key)
+        genai.configure(api_key=self.api_key)
+        self.model = genai.GenerativeModel(self.model_name)
 
     def infer(self, prompt: str) -> str:
-        """Call Claude API and return the response."""
+        """Call Gemini API and return the response."""
         try:
-            message = self.client.messages.create(
-                model=self.model_name,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                messages=[{"role": "user", "content": prompt}],
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                ),
             )
-            return message.content[0].text
+            return response.text
         except Exception as e:
             raise RuntimeError(f"API call failed: {str(e)}")
 
     def infer_with_context(
         self, system_prompt: str, user_prompt: str
     ) -> str:
-        """Call Claude API with system prompt for better control."""
+        """Call Gemini API with system prompt for better control."""
         try:
-            message = self.client.messages.create(
-                model=self.model_name,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            response = self.model.generate_content(
+                full_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                ),
             )
-            return message.content[0].text
+            return response.text
         except Exception as e:
             raise RuntimeError(f"API call failed: {str(e)}")
 
@@ -148,109 +213,6 @@ class ContextBuilder:
 
 
 @dataclass
-class PromptManager:
-    """Manages prompt templates for different AI tasks."""
-
-    templates: Dict[str, str] = field(default_factory=dict)
-
-    def __post_init__(self):
-        """Initialize default prompt templates."""
-        self.templates = {
-            "explanation": self._explanation_template(),
-            "recommendation": self._recommendation_template(),
-            "preference": self._preference_template(),
-        }
-
-    def get_explanation_prompt(self, task_context: Dict, schedule_context: Dict) -> str:
-        """Generate a prompt for explaining why a task is scheduled at a specific time."""
-        template = self.templates["explanation"]
-        return template.format(
-            task_name=task_context["task_name"],
-            task_type=task_context["task_type"],
-            priority=task_context["priority"],
-            duration=task_context["duration"],
-            scheduled_time=task_context["scheduled_time"],
-            pet_name=schedule_context["pet_profile"]["name"],
-            owner_preferences=", ".join(
-                schedule_context["owner_profile"]["preferences"]
-            ),
-            other_pets=", ".join(schedule_context["other_pets"])
-            or "None",
-            frequency=task_context.get("frequency", "daily"),
-        )
-
-    def get_recommendation_prompt(self, pet_profile: Dict, owner_profile: Dict) -> str:
-        """Generate a prompt for recommending new tasks for a pet."""
-        template = self.templates["recommendation"]
-        return template.format(
-            pet_name=pet_profile["name"],
-            pet_type=pet_profile["type"],
-            breed=pet_profile["breed"],
-            age=pet_profile["age"],
-            owner_name=owner_profile["name"],
-            current_tasks=pet_profile["task_count"],
-            completed_tasks=pet_profile["completed_tasks"],
-            pet_count=owner_profile["pet_count"],
-            owner_preferences=", ".join(owner_profile["preferences"])
-            or "Not specified",
-        )
-
-    @staticmethod
-    def _explanation_template() -> str:
-        return """You are a pet care scheduling expert. Explain why the following task scheduling decision makes sense:
-
-Task: {task_name} ({task_type})
-Priority: {priority}
-Duration: {duration} minutes
-Scheduled Time: {scheduled_time}
-Pet: {pet_name}
-Owner Preferences: {owner_preferences}
-Other Pets: {other_pets}
-Task Frequency: {frequency}
-
-Provide a 2-3 sentence explanation that covers:
-1. Why this time works for the task type and priority
-2. How it respects owner preferences
-3. Any conflict avoidance or multi-pet considerations
-
-Be concise and conversational."""
-
-    @staticmethod
-    def _recommendation_template() -> str:
-        return """You are a pet care expert. Based on the following pet and owner information, recommend 2-3 new tasks that would improve the pet's wellbeing and quality of life:
-
-Pet Information:
-- Name: {pet_name}
-- Type: {pet_type}
-- Breed: {breed}
-- Age: {age} years old
-- Current Tasks: {current_tasks} tasks ({completed_tasks} completed)
-
-Owner Information:
-- Name: {owner_name}
-- Pets: {pet_count} total pets
-- Preferences: {owner_preferences}
-
-For each recommendation:
-1. Task name
-2. Task type (walk, feeding, grooming, enrichment, medication)
-3. Priority (high, medium, low)
-4. Frequency (daily, weekly, occasional)
-5. Brief reason why this task would benefit {pet_name}
-
-Format as a numbered list."""
-
-    @staticmethod
-    def _preference_template() -> str:
-        return """Analyze this owner's schedule history and infer their implicit preferences and constraints:
-
-{schedule_history}
-
-List 3-4 implicit preferences discovered (e.g., 'prefers morning walks', 'avoids evening grooming').
-Be specific and actionable."""
-
-
-@dataclass
 class Retriever:
     """Retrieves similar schedules and task patterns from history."""
 
@@ -311,22 +273,32 @@ class ExplanationGenerator:
 
     def __init__(
         self,
-        model: Model = Model.CLAUDE_HAIKU,
-        use_llm: bool = False,
+        model: Model = Model.GEMINI_3_5_FLASH,
+        use_llm: bool = True,
         api_key: str = "",
     ):
         self.model = model
-        self.use_llm = use_llm and ANTHROPIC_AVAILABLE
+        self.use_llm = use_llm
         self.context_builder = ContextBuilder()
         self.prompt_manager = PromptManager()
-
+        self.inference_engine = None
+        
         if self.use_llm:
-            self.inference_engine = InferenceEngine(
-                model_name=model.value,
-                api_key=api_key or os.getenv("ANTHROPIC_API_KEY", ""),
-            )
-        else:
-            self.inference_engine = None
+            try:
+                final_key = api_key or os.getenv("GEMINI_API_KEY", "")
+                print(f"[ExplanationGenerator] Initializing with model: {model.value}")
+                print(f"[ExplanationGenerator] API key provided: {'Yes' if final_key else 'No'}")
+                self.inference_engine = InferenceEngine(
+                    model_name=model.value,
+                    api_key=final_key,
+                )
+                print(f"[ExplanationGenerator] ✓ LLM enabled successfully")
+            except Exception as e:
+                import traceback
+                print(f"[ExplanationGenerator] ✗ Failed to initialize LLM: {str(e)}")
+                traceback.print_exc()
+                self.use_llm = False
+                self.inference_engine = None
 
     def generate_task_explanation(
         self, task: Task, schedule: Dict, owner: Owner
@@ -340,11 +312,15 @@ class ExplanationGenerator:
             task.pet, owner, task.due_date
         )
 
+        # Debug: Check which path we're taking
+        print(f"  [DEBUG] use_llm={self.use_llm}, inference_engine={'Yes' if self.inference_engine else 'No'}")
+
         if self.use_llm and self.inference_engine:
             return self._generate_explanation_with_llm(
                 task_context, schedule_context
             )
         else:
+            print(f"  [DEBUG] Using rule-based explanation (not LLM)")
             return self._generate_explanation(task, schedule_context)
 
     def generate_schedule_summary(self, schedule: Dict, owner: Owner) -> str:
@@ -371,7 +347,7 @@ class ExplanationGenerator:
     def _generate_explanation_with_llm(
         self, task_context: Dict, schedule_context: Dict
     ) -> str:
-        """Generate explanation using Claude API."""
+        """Generate explanation using Gemini API."""
         system_prompt = """You are a pet care scheduling expert. Your job is to explain
 scheduling decisions in a friendly, conversational way. Keep explanations to 2-3 sentences.
 Focus on why the timing makes sense for the pet and owner."""
@@ -381,12 +357,14 @@ Focus on why the timing makes sense for the pet and owner."""
         )
 
         try:
+            print(f"  [LLM] Calling Gemini for: {task_context.get('task_name')}")
             response = self.inference_engine.infer_with_context(
                 system_prompt=system_prompt, user_prompt=prompt
             )
+            print(f"  [LLM] ✓ Got response ({len(response)} chars)")
             return response.strip()
-        except RuntimeError as e:
-            print(f"Warning: LLM call failed, falling back to rule-based explanation: {e}")
+        except Exception as e:
+            print(f"  [LLM] ✗ Error: {type(e).__name__}: {str(e)}")
             return self._generate_explanation_fallback(task_context)
 
     def _generate_explanation_fallback(self, task_context: Dict) -> str:
@@ -443,23 +421,33 @@ class TaskRecommender:
 
     def __init__(
         self,
-        model: Model = Model.CLAUDE_HAIKU,
+        model: Model = Model.GEMINI_3_5_FLASH,
         use_llm: bool = False,
         api_key: str = "",
     ):
         self.model = model
-        self.use_llm = use_llm and ANTHROPIC_AVAILABLE
+        self.use_llm = use_llm and GEMINI_AVAILABLE
         self.context_builder = ContextBuilder()
         self.prompt_manager = PromptManager()
         self.retriever = Retriever()
+        self.inference_engine = None
 
         if self.use_llm:
-            self.inference_engine = InferenceEngine(
-                model_name=model.value,
-                api_key=api_key or os.getenv("ANTHROPIC_API_KEY", ""),
-            )
-        else:
-            self.inference_engine = None
+            try:
+                final_key = api_key or os.getenv("GEMINI_API_KEY", "")
+                print(f"[TaskRecommender] Initializing with model: {model.value}")
+                print(f"[TaskRecommender] API key provided: {'Yes' if final_key else 'No'}")
+                self.inference_engine = InferenceEngine(
+                    model_name=model.value,
+                    api_key=final_key,
+                )
+                print(f"[TaskRecommender] ✓ LLM enabled successfully")
+            except Exception as e:
+                import traceback
+                print(f"[TaskRecommender] ✗ Failed to initialize LLM: {str(e)}")
+                traceback.print_exc()
+                self.use_llm = False
+                self.inference_engine = None
 
     def recommend_tasks(self, pet: Pet, owner: Owner) -> List[Dict]:
         """Generate task recommendations for a pet."""
@@ -490,7 +478,7 @@ class TaskRecommender:
     def _recommend_tasks_with_llm(
         self, pet_profile: Dict, owner_profile: Dict, pet: Pet
     ) -> List[Dict]:
-        """Generate recommendations using Claude API."""
+        """Generate recommendations using Gemini API."""
         system_prompt = """You are a pet care expert. Recommend 2-3 new tasks that would
 improve the pet's wellbeing. For each task, provide:
 1. Task name
@@ -506,55 +494,108 @@ Format as a numbered list. Be specific and actionable."""
         )
 
         try:
+            print(f"  [LLM] Generating recommendations for {pet.name}")
             response = self.inference_engine.infer_with_context(
                 system_prompt=system_prompt, user_prompt=prompt
             )
+            print(f"  [LLM] ✓ Got response ({len(response)} chars)")
+            print(f"  [LLM] Response:\n{response[:200]}...")  # Print first 200 chars for debug
             return self._parse_llm_recommendations(response)
-        except RuntimeError as e:
-            print(f"Warning: LLM call failed, using rule-based recommendations: {e}")
+        except Exception as e:
+            print(f"  [LLM] ✗ Error: {type(e).__name__}: {str(e)}")
             return self._generate_recommendations(pet)
 
     def _parse_llm_recommendations(self, llm_response: str) -> List[Dict]:
-        """Parse LLM response into structured recommendations."""
+        """Parse LLM markdown-formatted response into structured recommendations."""
+        import re
         recommendations = []
         lines = llm_response.strip().split("\n")
 
+        current_rec = {}
+
         for line in lines:
-            if not line.strip() or line.startswith("#"):
+            # Remove markdown formatting
+            clean_line = line.replace("**", "").strip()
+
+            if not clean_line or clean_line.startswith("#"):
                 continue
 
-            # Try to extract recommendation from line
-            # Format: "1. Task Name (type) - priority - frequency - Reason"
-            if any(char.isdigit() for char in line[:2]):
-                try:
-                    rec = self._extract_recommendation_from_line(line)
-                    if rec:
-                        recommendations.append(rec)
-                except (IndexError, ValueError):
+            # Look for numbered items (1., 2., etc.) - start of new recommendation
+            if re.match(r"^\d+\.", clean_line):
+                # Save previous recommendation if complete
+                if current_rec and current_rec.get("task_name"):
+                    self._complete_recommendation(current_rec)
+                    recommendations.append(current_rec)
+
+                # Extract task name - remove numbering
+                task_match = re.match(r"^\d+\.\s*(.+?)(?:\s*\*|$)", clean_line)
+                if task_match:
+                    current_rec = {"task_name": task_match.group(1).strip()}
+                continue
+
+            # Handle bullet points with field: value format
+            if line.strip().startswith("*") and ":" in clean_line:
+                if not current_rec:
                     continue
 
+                # Remove bullet point marker and clean
+                field_line = clean_line.lstrip("* -").strip()
+                if ":" not in field_line:
+                    continue
+
+                key, value = field_line.split(":", 1)
+                key_lower = key.strip().lower()
+                value = value.strip()
+
+                if "name" in key_lower and not current_rec.get("task_name"):
+                    current_rec["task_name"] = value
+                elif "type" in key_lower:
+                    # Normalize task type
+                    task_type = value.lower()
+                    if any(t in task_type for t in ["walk", "exercise", "morning", "sniffari"]):
+                        current_rec["task_type"] = "walk"
+                    elif any(t in task_type for t in ["feed", "meal", "breakfast"]):
+                        current_rec["task_type"] = "feeding"
+                    elif any(t in task_type for t in ["groom", "brush", "bath"]):
+                        current_rec["task_type"] = "grooming"
+                    elif any(t in task_type for t in ["train", "play", "enrichment", "mental"]):
+                        current_rec["task_type"] = "enrichment"
+                    elif any(t in task_type for t in ["medic", "health", "vet"]):
+                        current_rec["task_type"] = "medication"
+                    else:
+                        current_rec["task_type"] = task_type
+
+                elif "priority" in key_lower:
+                    current_rec["priority"] = value.lower().split()[0]
+                elif "frequency" in key_lower:
+                    freq = value.lower().split()[0]
+                    if freq in ["daily", "weekly", "monthly", "occasional"]:
+                        current_rec["frequency"] = freq
+                    else:
+                        current_rec["frequency"] = "daily"
+                elif any(k in key_lower for k in ["reason", "why", "benefit", "description"]):
+                    current_rec["reason"] = value
+
+        # Add last recommendation
+        if current_rec and current_rec.get("task_name"):
+            self._complete_recommendation(current_rec)
+            recommendations.append(current_rec)
+
+        print(f"  [LLM] Parsed {len(recommendations)} recommendations from LLM response" if recommendations else "  [LLM] No valid recommendations parsed from LLM response")
         return recommendations if recommendations else self._get_default_recommendations()
 
-    @staticmethod
-    def _extract_recommendation_from_line(line: str) -> Dict:
-        """Extract a single recommendation from a formatted line."""
-        parts = line.split("-")
-        if len(parts) < 4:
-            return None
-
-        task_name = parts[0].strip().lstrip("0123456789. ").strip()
-        task_type = parts[1].strip().lower() if len(parts) > 1 else "enrichment"
-        priority = parts[2].strip().lower() if len(parts) > 2 else "medium"
-        reason = "-".join(parts[3:]).strip() if len(parts) > 3 else "Recommended"
-
-        return {
-            "task_name": task_name,
-            "task_type": task_type,
-            "priority": priority,
-            "frequency": "daily" if "daily" in reason.lower() else "weekly",
-            "reason": reason,
-            "confidence": 0.85,
-        }
+    def _complete_recommendation(self, rec: Dict) -> None:
+        """Ensure recommendation has all required fields with sensible defaults."""
+        if not rec.get("task_type"):
+            rec["task_type"] = "enrichment"
+        if not rec.get("priority"):
+            rec["priority"] = "medium"
+        if not rec.get("frequency"):
+            rec["frequency"] = "daily"
+        if not rec.get("reason"):
+            rec["reason"] = "Recommended based on pet profile and schedule"
+        if not rec.get("confidence"):
+            rec["confidence"] = 0.85
 
     @staticmethod
     def _get_default_recommendations() -> List[Dict]:

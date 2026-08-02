@@ -1,20 +1,29 @@
-# LLM Integration Setup Guide
+# LLM Integration Setup Guide - Google Gemini API
 
-This guide shows how to integrate Claude API for AI-powered explanations and recommendations in PawPal+.
+This guide shows how to integrate Google Gemini API for AI-powered explanations and recommendations in PawPal+.
 
-## Step 1: Install the Anthropic SDK
+## Step 1: Install the Google Generative AI SDK
 
 ```bash
-pip install anthropic
+pip install google-generativeai
 ```
 
-## Step 2: Get Your API Key
+## Step 2: Get Your Gemini API Key
 
-1. Go to [Anthropic Console](https://console.anthropic.com/)
-2. Create an account or sign in
-3. Navigate to **API Keys** section
-4. Create a new API key
-5. Copy the key (starts with `sk-ant-`)
+### Option A: Google AI Studio (Easiest for Development)
+
+1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey)
+2. Click "Create API key in new project"
+3. Copy your API key (it's a long alphanumeric string)
+4. **Note**: This free tier has rate limits - good for development/testing
+
+### Option B: Google Cloud Console (For Production)
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project
+3. Enable the "Generative Language API"
+4. Create an API key in the Credentials section
+5. Copy your API key
 
 ## Step 3: Set the API Key
 
@@ -24,28 +33,34 @@ Choose one of these methods:
 
 **Windows (PowerShell):**
 ```powershell
-$env:ANTHROPIC_API_KEY='sk-ant-your-key-here'
+$env:GEMINI_API_KEY='your-api-key-here'
 ```
 
 **Windows (Command Prompt):**
 ```cmd
-set ANTHROPIC_API_KEY=sk-ant-your-key-here
+set GEMINI_API_KEY=your-api-key-here
 ```
 
 **Mac/Linux:**
 ```bash
-export ANTHROPIC_API_KEY='sk-ant-your-key-here'
+export GEMINI_API_KEY='your-api-key-here'
+```
+
+**Permanent (add to ~/.bashrc or ~/.zshrc):**
+```bash
+echo "export GEMINI_API_KEY='your-api-key-here'" >> ~/.bashrc
+source ~/.bashrc
 ```
 
 ### Option B: Pass directly to constructor
 
 ```python
-from ai_services import ExplanationGenerator, Model
+from ai_services import ExplanationGenerator
 
 gen = ExplanationGenerator(
-    model=Model.CLAUDE_HAIKU,
+    model=Model.GEMINI_2_FLASH,
     use_llm=True,
-    api_key='sk-ant-your-key-here'
+    api_key='your-api-key-here'
 )
 ```
 
@@ -69,7 +84,7 @@ schedule = scheduler.generate_daily_plan(datetime.now())
 
 # Generate explanation with LLM
 explanation_gen = ExplanationGenerator(
-    model=Model.CLAUDE_HAIKU,
+    model=Model.GEMINI_2_FLASH,
     use_llm=True  # Enable LLM calls
 )
 
@@ -85,7 +100,7 @@ print(explanation)
 from ai_services import TaskRecommender, Model
 
 recommender = TaskRecommender(
-    model=Model.CLAUDE_HAIKU,
+    model=Model.GEMINI_2_FLASH,
     use_llm=True  # Enable LLM calls
 )
 
@@ -98,32 +113,32 @@ for rec in ranked[:3]:
 
 ## Available Models
 
-The SDK supports three Claude models:
+Gemini offers several models with different speed/quality tradeoffs:
 
-| Model | Best For | Speed | Cost |
-|-------|----------|-------|------|
-| `CLAUDE_HAIKU` | Fast responses, lower cost | Very Fast | Lowest |
-| `CLAUDE_SONNET` | Balanced speed & quality | Fast | Medium |
-| `CLAUDE_OPUS` | Best quality responses | Slower | Higher |
+| Model | Best For | Speed | Cost | Availability |
+|-------|----------|-------|------|--------------|
+| `GEMINI_2_FLASH` | Fast responses, very low cost | Very Fast | Lowest | Latest |
+| `GEMINI_1_5_FLASH` | Balanced speed & quality | Fast | Low | Stable |
+| `GEMINI_1_5_PRO` | Best quality responses | Slower | Medium | Stable |
 
 ### Example: Using Different Models
 
 ```python
-# Fast and cheap
+# Fastest & cheapest (recommended for development)
 gen = ExplanationGenerator(
-    model=Model.CLAUDE_HAIKU,
+    model=Model.GEMINI_2_FLASH,
     use_llm=True
 )
 
-# Higher quality
+# Balanced speed and quality
 gen = ExplanationGenerator(
-    model=Model.CLAUDE_SONNET,
+    model=Model.GEMINI_1_5_FLASH,
     use_llm=True
 )
 
-# Best quality (but slower/more expensive)
+# Best quality (but slower)
 gen = ExplanationGenerator(
-    model=Model.CLAUDE_OPUS,
+    model=Model.GEMINI_1_5_PRO,
     use_llm=True
 )
 ```
@@ -139,6 +154,7 @@ So your app will still work even if:
 - API key is invalid
 - Network is down
 - API quota is exceeded
+- Rate limits are hit
 
 This is handled automatically with a warning message.
 
@@ -203,49 +219,82 @@ for rec in ranked[:3]:
 
 ## Troubleshooting
 
-### Error: "anthropic package is required"
+### Error: "google-generativeai package is required"
 ```
-pip install anthropic
+pip install google-generativeai
 ```
 
-### Error: "ANTHROPIC_API_KEY environment variable not set"
+### Error: "GEMINI_API_KEY environment variable not set"
 Set your API key (see Step 3 above)
 
-### Error: "API call failed"
-- Check your internet connection
-- Verify your API key is correct
-- Check if your API quota is exceeded
-- The app will automatically fall back to rule-based responses
+### Error: "API call failed: 403 Forbidden"
+- Check your API key is correct
+- Verify the API is enabled in Google Cloud Console
+- For free tier, check if you've hit rate limits
+
+### Error: "API call failed: 429 Too Many Requests"
+You've hit rate limits. The app will automatically fall back to rule-based responses.
+Free tier limits: 60 requests per minute
+
+### Error: "API call failed: 400 Bad Request"
+- Make sure you're using a valid Gemini model name
+- Check that your API key is active
+- Verify you're not sending too many tokens
 
 ### Explanations are still rule-based
 - Make sure `use_llm=True` is set
-- Check that ANTHROPIC_API_KEY is set
-- Verify the API key is correct
+- Check that GEMINI_API_KEY is set correctly
+- Verify the API key is valid (try in [Google AI Studio](https://aistudio.google.com/app/apikey))
 - Check console for error messages
 
 ## Pricing
 
-Claude API charges per token used:
+Gemini API is **free for development** with generous rate limits:
 
-- **Haiku**: ~$0.80 per 1M input tokens, ~$4 per 1M output tokens
-- **Sonnet**: ~$3 per 1M input tokens, ~$15 per 1M output tokens  
-- **Opus**: ~$15 per 1M input tokens, ~$75 per 1M output tokens
+### Free Tier (Google AI Studio)
+- **60 requests per minute** (shared across all models)
+- Gemini 1.5 Flash: Free
+- Gemini 2.0 Flash: Free
+- Great for testing and development
 
-A typical explanation = ~100-200 tokens
-A typical recommendation = ~200-300 tokens
+### Paid Tier (Google Cloud)
+- **$0.075 per 1M input tokens** (Gemini 1.5 Flash)
+- **$0.30 per 1M output tokens** (Gemini 1.5 Flash)
+- **$1.50 per 1M input tokens** (Gemini 1.5 Pro)
+- **$6.00 per 1M output tokens** (Gemini 1.5 Pro)
+- Gemini 2.0 Flash: Pricing TBD
 
-Cost per task explanation with Haiku: ~$0.0001-0.0002
+### Cost Examples
+- A typical explanation = ~100-200 tokens
+- A typical recommendation = ~200-300 tokens
+- Cost per explanation with Flash: ~$0.00001-0.00003
+- Cost per recommendation with Flash: ~$0.00002-0.00005
+
+**Note**: Gemini is significantly cheaper than Claude!
+
+## Comparison: Gemini vs Claude
+
+| Aspect | Gemini 2.0 Flash | Claude 3.5 Haiku |
+|--------|-----------------|-----------------|
+| Input Cost | $0 (free tier) | ~$0.80/1M tokens |
+| Output Cost | $0 (free tier) | ~$4/1M tokens |
+| Speed | Very Fast | Fast |
+| Quality | Excellent | Excellent |
+| Free Tier | Yes (60 req/min) | No |
+| Best For | Development | Production |
 
 ## Next Steps
 
-1. ✅ Install anthropic package
-2. ✅ Get API key
-3. ✅ Set environment variable
+1. ✅ Install google-generativeai package
+2. ✅ Get API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+3. ✅ Set GEMINI_API_KEY environment variable
 4. ✅ Update your code to use `use_llm=True`
 5. Run your app and enjoy AI-powered explanations!
 
 ## More Resources
 
-- [Anthropic Console](https://console.anthropic.com/)
-- [Claude API Documentation](https://docs.anthropic.com/)
-- [Pricing Calculator](https://www.anthropic.com/pricing)
+- [Google AI Studio](https://aistudio.google.com/app/apikey) - Get API keys
+- [Google Cloud Console](https://console.cloud.google.com/) - Production setup
+- [Gemini API Documentation](https://ai.google.dev/)
+- [Gemini Models](https://ai.google.dev/models)
+- [Free Tier Info](https://ai.google.dev/pricing)

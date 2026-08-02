@@ -4,12 +4,12 @@
 
 ### 1. Install
 ```bash
-pip install anthropic
+pip install google-generativeai
 ```
 
 ### 2. Set API Key
 ```bash
-export ANTHROPIC_API_KEY='sk-ant-your-key-here'
+export GEMINI_API_KEY='your-gemini-api-key-here'
 ```
 
 ### 3. Enable LLM (in your code)
@@ -75,13 +75,13 @@ For different speed/quality tradeoffs:
 from ai_services import ExplanationGenerator, Model
 
 # Fast & cheap (recommended)
-gen = ExplanationGenerator(model=Model.CLAUDE_HAIKU, use_llm=True)
+gen = ExplanationGenerator(model=Model.GEMINI_2_FLASH, use_llm=True)
 
 # Balanced
-gen = ExplanationGenerator(model=Model.CLAUDE_SONNET, use_llm=True)
+gen = ExplanationGenerator(model=Model.GEMINI_1_5_FLASH, use_llm=True)
 
 # Best quality but slower
-gen = ExplanationGenerator(model=Model.CLAUDE_OPUS, use_llm=True)
+gen = ExplanationGenerator(model=Model.GEMINI_1_5_PRO, use_llm=True)
 ```
 
 ## Fallback Behavior
@@ -107,7 +107,7 @@ python example_llm_usage.py
 
 ### With LLM (API Key Required)
 ```bash
-export ANTHROPIC_API_KEY='sk-ant-xxx'
+export GEMINI_API_KEY='your-gemini-api-key'
 python example_llm_usage.py
 ```
 
@@ -117,9 +117,9 @@ python example_llm_usage.py
 | Aspect | Rule-Based | LLM |
 |--------|-----------|-----|
 | Quality | Good (rule-based) | Excellent (natural language) |
-| Speed | Instant | ~1-2 seconds |
-| Setup | None | Install anthropic, set API key |
-| Cost | Free | ~$0.0002 per explanation |
+| Speed | Instant | ~500ms-1s |
+| Setup | None | Install google-generativeai, set API key |
+| Cost | Free | ~$0.00001-0.0001 per explanation |
 
 ### TaskRecommender
 | Aspect | Rule-Based | LLM |
@@ -127,7 +127,7 @@ python example_llm_usage.py
 | Recommendations | Generic (based on pet type) | Personalized to owner |
 | Count | 2-3 per pet | 2-3 per pet |
 | Reasoning | Predefined | Context-aware |
-| Cost | Free | ~$0.0003 per recommendation set |
+| Cost | Free | ~$0.00001-0.0002 per recommendation set |
 
 ## Common Questions
 
