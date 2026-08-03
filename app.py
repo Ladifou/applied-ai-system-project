@@ -3,7 +3,6 @@ from datetime import datetime
 from pawpal_system import TaskType, Owner, Pet, Constraint, Task, Scheduler
 import os
 from ai_services import ExplanationGenerator, TaskRecommender, ContextBuilder, Model, InferenceEngine, _get_api_key
-from prompts_manager import PromptGuardrails
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="wide")
 
@@ -12,6 +11,63 @@ st.title("🐾 PawPal+")
 # Initialize session state for chat
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# Initialize AI services
+@st.cache_resource
+def init_ai_services():
+    try:
+        gemini_key = _get_api_key()
+        explanation_gen = ExplanationGenerator(
+            model=Model.GEMINI_3_5_FLASH,
+            use_llm=True,
+            api_key=gemini_key
+        )
+        task_rec = TaskRecommender(
+            model=Model.GEMINI_3_5_FLASH,
+            use_llm=True,
+            api_key=gemini_key
+        )
+        return explanation_gen, task_rec
+    except Exception as e:
+        st.warning(f"Could not initialize AI services: {str(e)}")
+        return None, None
+
+explanation_gen, task_recommender = init_ai_services()
+
+def get_owner_and_pet_context():
+    owner = st.session_state.owners.get("owner_1")
+    if not owner or not owner.pets:
+        return None, None
+    return owner, owner.pets[0] if owner.pets else None
+
+def generate_ai_response(user_input: str, owner: Owner, pets: list) -> str:
+    """Generate a conversational response using Gemini."""
+    pet_info = "\n".join([f"- {p.name}: {p.pet_type}, age {p.age}, {p.breed}" for p in pets])
+
+    system_prompt = "You are a friendly pet care expert helping manage pet schedules using PawPal+. Provide helpful, conversational responses about pet care. Be specific about tasks suited to pets' types and ages. Keep responses concise (2-3 sentences)."
+
+    user_prompt = f"""User's Pets:
+{pet_info}
+
+User Question: {user_input}"""
+
+    try:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return "⚠️ GEMINI_API_KEY not set. Please set your environment variable to use the chat feature."
+
+        inference_engine = InferenceEngine(
+            model_name=Model.GEMINI_3_5_FLASH.value,
+            api_key=api_key,
+            max_tokens=2000
+        )
+        response = inference_engine.infer_with_context(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt
+        )
+        return response
+    except Exception as e:
+        return f"I encountered an error generating a response: {str(e)}"
 
 tab1, tab2 = st.tabs(["📅 Schedule Manager", "💬 AI Chat Assistant"])
 
@@ -387,12 +443,24 @@ with tab1:
                 # Display scheduling explanations
                 st.divider()
                 st.markdown("### 📝 Scheduling Rationale")
-                st.caption("Detailed explanations of why each task was scheduled at its specific time")
+                st.caption("AI-generated explanations of why each task was scheduled at its specific time")
 
                 for pet, scheduler, daily_plan in all_schedules:
                     with st.expander(f"🐾 {pet.name} - Scheduling Details"):
-                        explanation = scheduler.explain_schedule(daily_plan['explanation'])
-                        st.text(explanation)
+                        # Generate AI-based scheduling explanation
+                        tasks_info = "\n".join([
+                            f"- {task.name}: {task.start_time.strftime('%H:%M') if task.start_time else 'Unscheduled'} - {task.end_time.strftime('%H:%M') if task.end_time else ''} ({task.default_priority} priority)"
+                            for task in daily_plan["scheduled_tasks"]
+                        ])
+
+                        explanation_prompt = f"""Explain why the following tasks were scheduled at these specific times for {pet.name} ({pet.pet_type}, age {pet.age}). Consider the pet's needs, priorities, and daily routine:
+
+{tasks_info}
+
+Provide a concise, friendly explanation (2-3 sentences per task) for the scheduling decisions."""
+
+                        ai_explanation = generate_ai_response(explanation_prompt, owner, [pet])
+                        st.write(ai_explanation)
             else:
                 st.info("No tasks to display.")
         else:
@@ -402,34 +470,6 @@ with tab1:
 with tab2:
     st.subheader("💬 AI Chat Assistant")
     st.caption("Ask the AI assistant questions about your pets and get personalized suggestions powered by AI services!")
-
-    # Initialize AI services
-    @st.cache_resource
-    def init_ai_services():
-        try:
-            gemini_key = _get_api_key()
-            explanation_gen = ExplanationGenerator(
-                model=Model.GEMINI_3_5_FLASH,
-                use_llm=True,
-                api_key=gemini_key
-            )
-            task_rec = TaskRecommender(
-                model=Model.GEMINI_3_5_FLASH,
-                use_llm=True,
-                api_key=gemini_key
-            )
-            return explanation_gen, task_rec
-        except Exception as e:
-            st.warning(f"Could not initialize AI services: {str(e)}")
-            return None, None
-
-    explanation_gen, task_recommender = init_ai_services()
-
-    def get_owner_and_pet_context():
-        owner = st.session_state.owners.get("owner_1")
-        if not owner or not owner.pets:
-            return None, None
-        return owner, owner.pets[0] if owner.pets else None
 
     def handle_pet_question(user_input: str, owner: Owner, pet: Pet) -> str:
         """Use AI services to answer pet-related questions."""
@@ -449,35 +489,6 @@ with tab2:
             pass
         return None
 
-    def generate_ai_response(user_input: str, owner: Owner, pets: list) -> str:
-        """Generate a conversational response using Gemini."""
-        pet_info = "\n".join([f"- {p.name}: {p.pet_type}, age {p.age}, {p.breed}" for p in pets])
-
-        system_prompt = "You are a friendly pet care expert helping manage pet schedules using PawPal+. Provide helpful, conversational responses about pet care. Be specific about tasks suited to pets' types and ages. Keep responses concise (2-3 sentences)."
-
-        user_prompt = f"""User's Pets:
-{pet_info}
-
-User Question: {user_input}"""
-
-        try:
-            api_key = os.getenv("GEMINI_API_KEY")
-            if not api_key:
-                return "⚠️ GEMINI_API_KEY not set. Please set your environment variable to use the chat feature."
-
-            inference_engine = InferenceEngine(
-                model_name=Model.GEMINI_3_5_FLASH.value,
-                api_key=api_key,
-                max_tokens=2000
-            )
-            response = inference_engine.infer_with_context(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt
-            )
-            return response
-        except Exception as e:
-            return f"I encountered an error generating a response: {str(e)}"
-
     # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -494,33 +505,20 @@ User Question: {user_input}"""
         with st.chat_message("user"):
             st.write(user_input)
 
-        # GUARDRAILS: Validate prompt relevance
-        api_key = os.getenv("GEMINI_API_KEY")
-        is_valid, rejection_reason = PromptGuardrails.validate_prompt(
-            user_input,
-            api_key=api_key,
-            use_ai_layer=True  # Enable AI-based validation for nuanced cases
-        )
+        owner, first_pet = get_owner_and_pet_context()
 
-        if not is_valid:
-            # Prompt is out of scope
-            assistant_message = rejection_reason + "\n\n" + PromptGuardrails.get_suggestions_for_scope()
+        if not owner or not owner.pets:
+            assistant_message = "I notice you haven't added any pets yet! Add some pets in the Schedule Manager tab so I can give you personalized recommendations."
         else:
-            # Prompt is valid - proceed with normal processing
-            owner, first_pet = get_owner_and_pet_context()
+            # Try specialized AI services first
+            assistant_message = None
 
-            if not owner or not owner.pets:
-                assistant_message = "I notice you haven't added any pets yet! Add some pets in the Schedule Manager tab so I can give you personalized recommendations."
-            else:
-                # Try specialized AI services first
-                assistant_message = None
+            if first_pet:
+                assistant_message = handle_pet_question(user_input, owner, first_pet)
 
-                if first_pet:
-                    assistant_message = handle_pet_question(user_input, owner, first_pet)
-
-                # Fall back to conversational AI
-                if not assistant_message:
-                    assistant_message = generate_ai_response(user_input, owner, owner.pets)
+            # Fall back to conversational AI
+            if not assistant_message:
+                assistant_message = generate_ai_response(user_input, owner, owner.pets)
 
         # Add assistant response to history
         st.session_state.messages.append({"role": "assistant", "content": assistant_message})
