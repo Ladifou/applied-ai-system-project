@@ -119,7 +119,7 @@ class PromptGuardrails:
         'age', 'owner', 'preferences', 'availability', 'conflict',
         'priority', 'duration', 'frequency', 'behavior', 'wellness',
         'vet', 'nutrition', 'routine', 'daycare', 'appointments',
-        'pawpal', 'scheduler', 'suggest', 'recommend', 'help',
+        'pawpal', 'schedule', 'suggest', 'recommend', 'help',
         'advice', 'tip', 'question', 'work', 'morning', 'evening'
     }
 

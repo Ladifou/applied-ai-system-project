@@ -2,8 +2,8 @@ import streamlit as st
 from datetime import datetime
 from pawpal_system import TaskType, Owner, Pet, Constraint, Task, Scheduler
 import os
-from ai_services import ExplanationGenerator, TaskRecommender, ContextBuilder, Model, InferenceEngine
-from prompts_manager import PromptGuardrails, _get_api_key
+from ai_services import ExplanationGenerator, TaskRecommender, ContextBuilder, Model, InferenceEngine, _get_api_key
+from prompts_manager import PromptGuardrails
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="wide")
 
