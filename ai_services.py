@@ -43,33 +43,8 @@ def load_env_config():
 
 def _get_api_key() -> str:
     """Get API key from .env file or environment variable."""
-    import sys
-
-    # Debug: Show what we're looking for
-    script_dir = Path(__file__).parent
-    env_file_1 = script_dir / ".env"
-    env_file_2 = Path.cwd() / ".env"
-
-    # Load the config
     load_env_config()
-
-    # Try to get the key
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
-
-    # Debug output
-    if not api_key:
-        print(f"[DEBUG] Looking for .env files:", file=sys.stderr)
-        print(f"  Path 1: {env_file_1} (exists: {env_file_1.exists()})", file=sys.stderr)
-        print(f"  Path 2: {env_file_2} (exists: {env_file_2.exists()})", file=sys.stderr)
-        print(f"  DOTENV_AVAILABLE: {DOTENV_AVAILABLE}", file=sys.stderr)
-        if env_file_1.exists():
-            print(f"  Reading {env_file_1}...", file=sys.stderr)
-            with open(env_file_1) as f:
-                lines = f.readlines()
-                for line in lines:
-                    if line.startswith("GEMINI_API_KEY"):
-                        print(f"    Found line: {line[:50]}", file=sys.stderr)
-
     return api_key
 
 
@@ -85,7 +60,7 @@ class InferenceEngine:
     """Handles actual LLM inference calls to Google Gemini API."""
 
     model_name: str = Model.GEMINI_3_5_FLASH.value
-    max_tokens: int = 5000
+    max_tokens: int = 2000
     temperature: float = 0.7
     api_key: str = field(default_factory=lambda: _get_api_key())
 
@@ -286,17 +261,11 @@ class ExplanationGenerator:
         if self.use_llm:
             try:
                 final_key = api_key or os.getenv("GEMINI_API_KEY", "")
-                print(f"[ExplanationGenerator] Initializing with model: {model.value}")
-                print(f"[ExplanationGenerator] API key provided: {'Yes' if final_key else 'No'}")
                 self.inference_engine = InferenceEngine(
                     model_name=model.value,
                     api_key=final_key,
                 )
-                print(f"[ExplanationGenerator] ✓ LLM enabled successfully")
-            except Exception as e:
-                import traceback
-                print(f"[ExplanationGenerator] ✗ Failed to initialize LLM: {str(e)}")
-                traceback.print_exc()
+            except Exception:
                 self.use_llm = False
                 self.inference_engine = None
 
@@ -312,15 +281,11 @@ class ExplanationGenerator:
             task.pet, owner, task.due_date
         )
 
-        # Debug: Check which path we're taking
-        print(f"  [DEBUG] use_llm={self.use_llm}, inference_engine={'Yes' if self.inference_engine else 'No'}")
-
         if self.use_llm and self.inference_engine:
             return self._generate_explanation_with_llm(
                 task_context, schedule_context
             )
         else:
-            print(f"  [DEBUG] Using rule-based explanation (not LLM)")
             return self._generate_explanation(task, schedule_context)
 
     def generate_schedule_summary(self, schedule: Dict, owner: Owner) -> str:
@@ -357,14 +322,11 @@ Focus on why the timing makes sense for the pet and owner."""
         )
 
         try:
-            print(f"  [LLM] Calling Gemini for: {task_context.get('task_name')}")
             response = self.inference_engine.infer_with_context(
                 system_prompt=system_prompt, user_prompt=prompt
             )
-            print(f"  [LLM] ✓ Got response ({len(response)} chars)")
             return response.strip()
-        except Exception as e:
-            print(f"  [LLM] ✗ Error: {type(e).__name__}: {str(e)}")
+        except Exception:
             return self._generate_explanation_fallback(task_context)
 
     def _generate_explanation_fallback(self, task_context: Dict) -> str:
@@ -435,17 +397,11 @@ class TaskRecommender:
         if self.use_llm:
             try:
                 final_key = api_key or os.getenv("GEMINI_API_KEY", "")
-                print(f"[TaskRecommender] Initializing with model: {model.value}")
-                print(f"[TaskRecommender] API key provided: {'Yes' if final_key else 'No'}")
                 self.inference_engine = InferenceEngine(
                     model_name=model.value,
                     api_key=final_key,
                 )
-                print(f"[TaskRecommender] ✓ LLM enabled successfully")
-            except Exception as e:
-                import traceback
-                print(f"[TaskRecommender] ✗ Failed to initialize LLM: {str(e)}")
-                traceback.print_exc()
+            except Exception:
                 self.use_llm = False
                 self.inference_engine = None
 
@@ -494,15 +450,11 @@ Format as a numbered list. Be specific and actionable."""
         )
 
         try:
-            print(f"  [LLM] Generating recommendations for {pet.name}")
             response = self.inference_engine.infer_with_context(
                 system_prompt=system_prompt, user_prompt=prompt
             )
-            print(f"  [LLM] ✓ Got response ({len(response)} chars)")
-            print(f"  [LLM] Response:\n{response[:200]}...")  # Print first 200 chars for debug
             return self._parse_llm_recommendations(response)
-        except Exception as e:
-            print(f"  [LLM] ✗ Error: {type(e).__name__}: {str(e)}")
+        except Exception:
             return self._generate_recommendations(pet)
 
     def _parse_llm_recommendations(self, llm_response: str) -> List[Dict]:
@@ -581,7 +533,6 @@ Format as a numbered list. Be specific and actionable."""
             self._complete_recommendation(current_rec)
             recommendations.append(current_rec)
 
-        print(f"  [LLM] Parsed {len(recommendations)} recommendations from LLM response" if recommendations else "  [LLM] No valid recommendations parsed from LLM response")
         return recommendations if recommendations else self._get_default_recommendations()
 
     def _complete_recommendation(self, rec: Dict) -> None:

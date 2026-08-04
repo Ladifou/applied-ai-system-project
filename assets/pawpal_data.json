@@ -1,0 +1,296 @@
+{
+  "owners": {
+    "owner_1": {
+      "name": "James Chen",
+      "email": "james.chen@email.com",
+      "phone": "555-0456",
+      "address": "456 Maple Avenue, Portland, OR",
+      "preferences": [
+        "morning",
+        "limited_availability"
+      ],
+      "pets": [
+        {
+          "pet_id": "pet_1",
+          "name": "Luna",
+          "pet_type": "dog",
+          "breed": "Husky",
+          "age": 4,
+          "tasks": [
+            {
+              "task_id": "task_1",
+              "name": "Morning Run",
+              "description": "Energetic run to burn off energy",
+              "task_type": "walk",
+              "default_duration": 45,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T06:20:00",
+              "end_time": "2026-08-03T07:05:00"
+            },
+            {
+              "task_id": "task_2",
+              "name": "Breakfast",
+              "description": "Morning meal",
+              "task_type": "feeding",
+              "default_duration": 15,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T09:00:00",
+              "end_time": "2026-08-03T09:15:00"
+            },
+            {
+              "task_id": "task_3",
+              "name": "Evening Walk",
+              "description": "Relaxing evening walk",
+              "task_type": "walk",
+              "default_duration": 30,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T07:40:00",
+              "end_time": "2026-08-03T08:10:00"
+            },
+            {
+              "task_id": "task_4",
+              "name": "Dinner",
+              "description": "Evening meal",
+              "task_type": "feeding",
+              "default_duration": 15,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T09:25:00",
+              "end_time": "2026-08-03T09:40:00"
+            },
+            {
+              "task_id": "task_5",
+              "name": "Training Session",
+              "description": "Obedience and agility training",
+              "task_type": "enrichment",
+              "default_duration": 30,
+              "default_frequency": "daily",
+              "default_priority": "medium",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T11:25:00",
+              "end_time": "2026-08-03T11:55:00"
+            },
+            {
+              "task_id": "task_6",
+              "name": "Bath Time",
+              "description": "Weekly bath",
+              "task_type": "grooming",
+              "default_duration": 45,
+              "default_frequency": "weekly",
+              "default_priority": "medium",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T11:55:00",
+              "end_time": "2026-08-03T12:40:00"
+            }
+          ]
+        },
+        {
+          "pet_id": "pet_2",
+          "name": "Mittens",
+          "pet_type": "cat",
+          "breed": "Orange Tabby",
+          "age": 5,
+          "tasks": [
+            {
+              "task_id": "task_7",
+              "name": "Breakfast",
+              "description": "Morning meal",
+              "task_type": "feeding",
+              "default_duration": 5,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T09:15:00",
+              "end_time": "2026-08-03T09:20:00"
+            },
+            {
+              "task_id": "task_8",
+              "name": "Lunch",
+              "description": "Midday meal",
+              "task_type": "feeding",
+              "default_duration": 5,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T09:20:00",
+              "end_time": "2026-08-03T09:25:00"
+            },
+            {
+              "task_id": "task_9",
+              "name": "Dinner",
+              "description": "Evening meal",
+              "task_type": "feeding",
+              "default_duration": 5,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T09:40:00",
+              "end_time": "2026-08-03T09:45:00"
+            },
+            {
+              "task_id": "task_10",
+              "name": "Litter Box Cleaning",
+              "description": "Daily litter box maintenance",
+              "task_type": "enrichment",
+              "default_duration": 10,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T09:45:00",
+              "end_time": "2026-08-03T09:55:00"
+            },
+            {
+              "task_id": "task_11",
+              "name": "Playtime",
+              "description": "Interactive play with toys",
+              "task_type": "enrichment",
+              "default_duration": 20,
+              "default_frequency": "daily",
+              "default_priority": "medium",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T09:55:00",
+              "end_time": "2026-08-03T10:15:00"
+            }
+          ]
+        },
+        {
+          "pet_id": "pet_3",
+          "name": "Daisy",
+          "pet_type": "dog",
+          "breed": "Cocker Spaniel",
+          "age": 2,
+          "tasks": [
+            {
+              "task_id": "task_12",
+              "name": "Morning Walk",
+              "description": "Start the day with a walk",
+              "task_type": "walk",
+              "default_duration": 25,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T07:05:00",
+              "end_time": "2026-08-03T07:30:00"
+            },
+            {
+              "task_id": "task_13",
+              "name": "Feeding",
+              "description": "Regular meals",
+              "task_type": "feeding",
+              "default_duration": 10,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T10:15:00",
+              "end_time": "2026-08-03T10:25:00"
+            },
+            {
+              "task_id": "task_14",
+              "name": "Afternoon Walk",
+              "description": "Midday exercise",
+              "task_type": "walk",
+              "default_duration": 20,
+              "default_frequency": "daily",
+              "default_priority": "high",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T06:00:00",
+              "end_time": "2026-08-03T06:20:00"
+            },
+            {
+              "task_id": "task_15",
+              "name": "Fetch Game",
+              "description": "Interactive fetch and play",
+              "task_type": "enrichment",
+              "default_duration": 25,
+              "default_frequency": "daily",
+              "default_priority": "medium",
+              "is_completed": false,
+              "due_date": "2026-08-03T00:00:00",
+              "start_time": "2026-08-03T10:25:00",
+              "end_time": "2026-08-03T10:50:00"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "tasks": [
+    {
+      "pet": "Luna",
+      "title": "Morning Run",
+      "duration_minutes": 45,
+      "priority": "high",
+      "type": "walk",
+      "frequency": "daily"
+    },
+    {
+      "pet": "Luna",
+      "title": "Breakfast",
+      "duration_minutes": 15,
+      "priority": "high",
+      "type": "feeding",
+      "frequency": "daily"
+    },
+    {
+      "pet": "Luna",
+      "title": "Training Session",
+      "duration_minutes": 30,
+      "priority": "medium",
+      "type": "enrichment",
+      "frequency": "daily"
+    },
+    {
+      "pet": "Mittens",
+      "title": "Breakfast",
+      "duration_minutes": 5,
+      "priority": "high",
+      "type": "feeding",
+      "frequency": "daily"
+    },
+    {
+      "pet": "Mittens",
+      "title": "Litter Box Cleaning",
+      "duration_minutes": 10,
+      "priority": "high",
+      "type": "enrichment",
+      "frequency": "daily"
+    },
+    {
+      "pet": "Daisy",
+      "title": "Morning Walk",
+      "duration_minutes": 25,
+      "priority": "high",
+      "type": "walk",
+      "frequency": "daily"
+    },
+    {
+      "pet": "Daisy",
+      "title": "Fetch Game",
+      "duration_minutes": 25,
+      "priority": "medium",
+      "type": "enrichment",
+      "frequency": "daily"
+    }
+  ]
+}

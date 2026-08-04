@@ -1,8 +1,8 @@
 import streamlit as st
 from datetime import datetime
 from pawpal_system import TaskType, Owner, Pet, Constraint, Task, Scheduler
-import os
 from ai_services import ExplanationGenerator, TaskRecommender, ContextBuilder, Model, InferenceEngine, _get_api_key
+from data_persistence import load_data, deserialize_owner_data, save_data
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="wide")
 
@@ -11,6 +11,53 @@ st.title("🐾 PawPal+")
 # Initialize session state for chat
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# Load persisted data on startup
+if "data_loaded" not in st.session_state:
+    loaded_data = load_data()
+    if loaded_data:
+        st.session_state.owners = deserialize_owner_data(loaded_data.get("owners", {}))
+        st.session_state.tasks = loaded_data.get("tasks", [])
+
+        # Populate session state with loaded data
+        if "pets" not in st.session_state:
+            st.session_state.pets = {}
+
+        owner = st.session_state.owners.get("owner_1")
+        if owner:
+            # Populate pets dictionary
+            for pet in owner.pets:
+                st.session_state.pets[pet.pet_id] = pet
+
+            # Set pet counter based on loaded pets
+            if "pet_counter" not in st.session_state:
+                st.session_state.pet_counter = len(owner.pets)
+
+        # Populate added_task_ids
+        if "added_task_ids" not in st.session_state:
+            st.session_state.added_task_ids = set()
+            if owner:
+                for pet in owner.pets:
+                    for task in pet.tasks:
+                        st.session_state.added_task_ids.add(task.task_id)
+
+        st.success("✓ Previous data loaded!")
+    else:
+        st.session_state.owners = {}
+        st.session_state.tasks = []
+        st.session_state.pets = {}
+        st.session_state.pet_counter = 0
+        st.session_state.added_task_ids = set()
+
+    # Initialize other session state variables if not present
+    if "all_schedules" not in st.session_state:
+        st.session_state.all_schedules = None
+    if "global_result" not in st.session_state:
+        st.session_state.global_result = None
+    if "completion_messages" not in st.session_state:
+        st.session_state.completion_messages = []
+
+    st.session_state.data_loaded = True
 
 # Initialize AI services
 @st.cache_resource
@@ -32,7 +79,21 @@ def init_ai_services():
         st.warning(f"Could not initialize AI services: {str(e)}")
         return None, None
 
+@st.cache_resource
+def init_inference_engine():
+    try:
+        api_key = _get_api_key()
+        return InferenceEngine(
+            model_name=Model.GEMINI_3_5_FLASH.value,
+            api_key=api_key,
+            max_tokens=2000
+        )
+    except Exception as e:
+        st.warning(f"Could not initialize inference engine: {str(e)}")
+        return None
+
 explanation_gen, task_recommender = init_ai_services()
+inference_engine = init_inference_engine()
 
 def get_owner_and_pet_context():
     owner = st.session_state.owners.get("owner_1")
@@ -41,7 +102,14 @@ def get_owner_and_pet_context():
     return owner, owner.pets[0] if owner.pets else None
 
 def generate_ai_response(user_input: str, owner: Owner, pets: list) -> str:
-    """Generate a conversational response using Gemini."""
+    """Generate a conversational response using Gemini (cached per unique input)."""
+    if not inference_engine:
+        return "⚠️ Inference engine not initialized. Please check your API key."
+
+    # Initialize cache in session state
+    if "ai_response_cache" not in st.session_state:
+        st.session_state.ai_response_cache = {}
+
     pet_info = "\n".join([f"- {p.name}: {p.pet_type}, age {p.age}, {p.breed}" for p in pets])
 
     system_prompt = "You are a friendly pet care expert helping manage pet schedules using PawPal+. Provide helpful, conversational responses about pet care. Be specific about tasks suited to pets' types and ages. Keep responses concise (2-3 sentences)."
@@ -51,20 +119,20 @@ def generate_ai_response(user_input: str, owner: Owner, pets: list) -> str:
 
 User Question: {user_input}"""
 
-    try:
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            return "⚠️ GEMINI_API_KEY not set. Please set your environment variable to use the chat feature."
+    # Create cache key from inputs
+    cache_key = hash((user_input, pet_info))
 
-        inference_engine = InferenceEngine(
-            model_name=Model.GEMINI_3_5_FLASH.value,
-            api_key=api_key,
-            max_tokens=2000
-        )
+    # Return cached response if available
+    if cache_key in st.session_state.ai_response_cache:
+        return st.session_state.ai_response_cache[cache_key]
+
+    try:
         response = inference_engine.infer_with_context(
             system_prompt=system_prompt,
             user_prompt=user_prompt
         )
+        # Store in cache
+        st.session_state.ai_response_cache[cache_key] = response
         return response
     except Exception as e:
         return f"I encountered an error generating a response: {str(e)}"
@@ -75,6 +143,16 @@ with tab1:
     st.divider()
 
     st.subheader("👤 Owner & Pets")
+
+    # Debug: Show loaded data status
+    with st.expander("ℹ️ Data Status"):
+        st.write(f"Owners loaded: {len(st.session_state.owners) > 0}")
+        st.write(f"Pets loaded: {len(st.session_state.pets)}")
+        st.write(f"Tasks loaded: {len(st.session_state.tasks)}")
+        if "owner_1" in st.session_state.owners:
+            o = st.session_state.owners["owner_1"]
+            st.write(f"Owner: {o.name}")
+            st.write(f"Preferences: {o.preferences if hasattr(o, 'preferences') else 'N/A'}")
 
     if "owners" not in st.session_state:
         st.session_state.owners = {}
@@ -104,15 +182,24 @@ with tab1:
     st.markdown("#### Owner Preferences")
     col1, col2 = st.columns(2)
     with col1:
-        if st.checkbox("Prefer morning walks (6 AM - 12 PM)"):
+        morning_checked = "morning" in owner.preferences if hasattr(owner, 'preferences') else False
+        if st.checkbox("Prefer morning walks (6 AM - 12 PM)", value=morning_checked, key="morning_walk"):
             if "morning" not in owner.preferences:
                 owner.add_preference("morning")
+        else:
+            if "morning" in owner.preferences:
+                owner.preferences.discard("morning")
     with col2:
-        if st.checkbox("Limited availability"):
+        limited_checked = "limited_availability" in owner.preferences if hasattr(owner, 'preferences') else False
+        if st.checkbox("Limited availability", value=limited_checked, key="limited_avail"):
             if "limited_availability" not in owner.preferences:
                 owner.add_preference("limited_availability")
+        else:
+            if "limited_availability" in owner.preferences:
+                owner.preferences.discard("limited_availability")
 
-    st.write(f"Preferences: {', '.join(owner.preferences) if owner.preferences else 'None'}")
+    prefs_str = ', '.join(owner.preferences) if (hasattr(owner, 'preferences') and owner.preferences) else 'None'
+    st.write(f"Preferences: {prefs_str}")
 
     # Pet management
     st.markdown("#### Pets")
@@ -256,6 +343,7 @@ with tab1:
 
             st.session_state.all_schedules = all_schedules
             st.session_state.global_result = global_result
+            save_data(st.session_state.owners, st.session_state.tasks)
             st.success("Schedule generated with global HIGH-priority task optimization!")
 
     # Display schedules if they exist
